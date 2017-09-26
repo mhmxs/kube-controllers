@@ -163,10 +163,7 @@ func NewPodController(k8sClientset *kubernetes.Clientset, calicoClient *client.C
 			// Clean up after the deleted workload endpoint.
 			wep := wepInterface.(converter.WorkloadEndpointData)
 			k := podConverter.GetKey(wep)
-			wepDataCache.Clean(k)
-			endpointCache.Lock()
-			delete(endpointCache.m, k)
-			endpointCache.Unlock()
+			wepDataCache.Delete(k)
 		},
 	}, cache.Indexers{})
 
@@ -239,9 +236,9 @@ func (c *PodController) processNextItem() bool {
 func (c *PodController) syncToCalico(key string) error {
 	// Check if the wep data exists in our cache.  If it doesn't, then we don't need to do anything,
 	// since CNI handles deletion of workload endpoints.
+	clog := log.WithField("wep", key)
 	if wepData, exists := c.wepDataCache.Get(key); exists {
 		// Get workloadEndpoint from cache
-		clog := log.WithField("wep", key)
 		c.endpointCache.RLock()
 		endpoint, exists := c.endpointCache.m[key]
 		c.endpointCache.RUnlock()
@@ -258,11 +255,10 @@ func (c *PodController) syncToCalico(key string) error {
 			endpoint, exists = c.endpointCache.m[key]
 			c.endpointCache.RUnlock()
 			if !exists {
-				// No endpoint in datastore - this means the pod hasn't been
-				// created by the CNI plugin yet. Just wait until it has been.
-				// This can only be hit when pod changes before
-				// the pod has been deployed, so should be pretty uncommon.
-				clog.Infof("Pod hasn't been created by the CNI plugin yet.")
+				// No endpoint in datastore. This means either:
+				// - We've received an update for a Pod before the CNI plugin started.
+				// - We've got a stale entry in our wepDataCache.
+				clog.Infof("Pod does not have corresponding WorkloadEndpoint in datastore")
 				return nil
 			}
 		}
@@ -307,6 +303,14 @@ func (c *PodController) syncToCalico(key string) error {
 			c.endpointCache.Unlock()
 			return nil
 		}
+	} else {
+		// The pod was deleted. Remove from the endpoint cache.
+		// Deletion of the workload endpoint is handled by the CNI plugin
+		// so we don't need to do that here.
+		clog.Debug("Deleting workload from endpoint cache")
+		c.endpointCache.Lock()
+		delete(c.endpointCache.m, k)
+		c.endpointCache.Unlock()
 	}
 	return nil
 }
