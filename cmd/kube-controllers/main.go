@@ -40,6 +40,7 @@ import (
 	"github.com/projectcalico/kube-controllers/pkg/controllers/networkpolicy"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/node"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/pod"
+	"github.com/projectcalico/kube-controllers/pkg/controllers/routereflector"
 	"github.com/projectcalico/kube-controllers/pkg/controllers/serviceaccount"
 	"github.com/projectcalico/kube-controllers/pkg/status"
 )
@@ -143,8 +144,14 @@ func main() {
 				controller:  serviceAccountController,
 				threadiness: config.ProfileWorkers,
 			}
+		case "routereflector":
+			rrController := routereflector.NewController(ctx, calicoClient)
+			controllerCtrl.controllerStates["RouteReflector"] = &controllerState{
+				controller:  rrController,
+				threadiness: 1,
+			}
 		default:
-			log.Fatalf("Invalid controller '%s' provided. Valid options are workloadendpoint, profile, policy", controllerType)
+			log.Fatalf("Invalid controller '%s' provided.", controllerType)
 		}
 	}
 
